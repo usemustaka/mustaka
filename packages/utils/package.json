@@ -1,0 +1,14 @@
+{
+  "name": "@mustaka/utils",
+  "module": "index.ts",
+  "type": "module",
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "es-toolkit": "^1.50.0"
+  }
+}

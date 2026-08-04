@@ -1,0 +1,15 @@
+{
+  "name": "@mustaka/email",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.ts",
+  "dependencies": {
+    "nodemailer": "^7.0.2"
+  },
+  "devDependencies": {
+    "@types/nodemailer": "^6.4.17"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}

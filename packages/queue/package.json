@@ -1,0 +1,13 @@
+{
+  "name": "@mustaka/queue",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.ts",
+  "dependencies": {
+    "bullmq": "^5.41.0",
+    "ioredis": "^5.6.1"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}

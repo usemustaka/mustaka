@@ -1,0 +1,24 @@
+{
+  "name": "@mustaka/db",
+  "version": "1.0.0",
+  "description": "Scaffolded with create-zenstack",
+  "type": "module",
+  "license": "ISC",
+  "scripts": {
+    "db:push": "bun --env-file=../../.env zen db push",
+    "db:generate": "bun --env-file=../../.env zen generate"
+  },
+  "dependencies": {
+    "@types/node": "^26.1.2",
+    "@zenstackhq/cli": "^3.8.3",
+    "@zenstackhq/orm": "^3.8.3",
+    "@zenstackhq/plugin-policy": "^3.8.3",
+    "@zenstackhq/schema": "^3.8.3",
+    "pg": "^8.22.0",
+    "tsx": "^4.23.1",
+    "typescript": "^7.0.2"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.20.0"
+  }
+}

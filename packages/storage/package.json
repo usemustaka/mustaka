@@ -1,0 +1,13 @@
+{
+  "name": "@mustaka/storage",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.ts",
+  "dependencies": {
+    "minio": "^8.0.6",
+    "ulid": "^3.0.2"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}

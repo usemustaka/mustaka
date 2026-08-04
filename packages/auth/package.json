@@ -1,0 +1,21 @@
+{
+  "name": "@mustaka/auth",
+  "module": "index.ts",
+  "type": "module",
+  "scripts": {
+     "auth:generate": "bun --env-file=../../.env run -- bun x @better-auth/cli generate --config ./index.ts --output ../db/zenstack/schema.zmodel -y"
+  },
+  "dependencies": {
+    "@zenstackhq/better-auth": "^3.8.3",
+    "better-auth": "^1.6.25",
+    "@mustaka/db": "workspace:*",
+    "@mustaka/logger": "workspace:*"
+  },
+  "devDependencies": {
+    "@better-auth/cli": "^1.4.21",
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}
