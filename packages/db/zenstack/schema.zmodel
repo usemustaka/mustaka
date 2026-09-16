@@ -1,0 +1,562 @@
+//////////////////////////////////////////////////////////////////////////////////////////////
+// Mustaka                                                                                  //
+//                                                                                          //
+// Sources:                                                                                 //
+//   - Auth block: Better Auth (email/password + organization + admin + phoneNumber +       //
+//     twoFactor plugins). Field names/types MUST stay byte-compatible with what             //
+//     `better-auth` writes through `zenstackAdapter` — do not rename plugins' columns.     //
+//                                                                                          //
+// Conventions (domain):                                                                    //
+//   - `organizationId`/`Person.userId` are PLAIN SCALARS where possible; `userId`      //
+//     columns are never FKs to the auth `user` table unless a navigation is required.      //
+//   - RLS scopes every domain model to the authenticated user's org via                    //
+//     `auth().members?[m, m.organizationId == this.organizationId]`.                       //
+//   - Lifecycle: `archivedAt` = hidden from active views, `deletedAt` = inaccessible        //
+//     (`@@deny`); hard `delete` is Owner-only.                                             //
+//   - IDs: `String @id @default(ulid())`; tables snake_case via `@@map`.                   //
+//////////////////////////////////////////////////////////////////////////////////////////////
+
+datasource db {
+    provider = 'postgresql'
+    url = env('DATABASE_URL')
+}
+
+plugin policy {
+    provider = '@zenstackhq/plugin-policy'
+}
+
+// -------------------------------------------------------------------------------------------
+// Auth (Better Auth)
+// -------------------------------------------------------------------------------------------
+// These models are written by Better Auth through a plain (non-policy) ZenStack client, so
+// the policies below only gate *domain* access via the policy-enabled client (`db`).
+// Keep column names/types aligned with better-auth's plugins.
+
+model User {
+    id                  String       @id
+    name                String
+    email               String       @unique
+    emailVerified       Boolean      @default(false)
+    image               String?
+    createdAt           DateTime     @default(now())
+    updatedAt           DateTime     @default(now()) @updatedAt
+    phoneNumber         String?      @unique
+    phoneNumberVerified Boolean?
+    role                String?
+    banned              Boolean?     @default(false)
+    banReason           String?
+    banExpires          DateTime?
+    twoFactorEnabled    Boolean?     @default(false)
+    sessions            Session[]
+    accounts            Account[]
+    members             Member[]
+    invitations         Invitation[]
+    twoFactors          TwoFactor[]
+    posts               Post[]
+    notifications       Notification[]
+    profile             Person? @relation('Profile')
+
+    @@allow('read', auth() != null)
+
+    @@map('user')
+}
+
+model Session {
+    id                   String   @id
+    expiresAt            DateTime
+    token                String   @unique
+    createdAt            DateTime @default(now())
+    updatedAt            DateTime @updatedAt
+    ipAddress            String?
+    userAgent            String?
+    userId               String
+    user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+    impersonatedBy       String?
+    activeOrganizationId String?
+
+    @@map('session')
+}
+
+model Account {
+    id                    String    @id
+    accountId             String
+    providerId            String
+    userId                String
+    user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+    accessToken           String?
+    refreshToken          String?
+    idToken               String?
+    accessTokenExpiresAt  DateTime?
+    refreshTokenExpiresAt DateTime?
+    scope                 String?
+    password              String?
+    createdAt             DateTime  @default(now())
+    updatedAt             DateTime  @updatedAt
+
+    @@map('account')
+}
+
+model Verification {
+    id         String   @id
+    identifier String
+    value      String
+    expiresAt  DateTime
+    createdAt  DateTime @default(now())
+    updatedAt  DateTime @default(now()) @updatedAt
+
+    @@map('verification')
+}
+
+model Organization {
+    id                String             @id
+    name              String
+    slug              String             @unique
+    logo              String?
+    createdAt         DateTime
+    // JSON string, owned by Better Auth: the org plugin JSON.stringify/JSON.parse it itself.
+    // Keep it a STRING column — a `@json` column would break the adapter round-trip.
+    // Expected shape (school metadata): { institutionType?, periodScheme?, gradeScale?,
+    // gradeLabels?, useGroups?, useStaff? }
+    metadata          String?
+    organizationRoles OrganizationRole[]
+    members           Member[]
+    invitations       Invitation[]
+    posts             Post[]
+
+    @@allow('create', auth() != null)
+    @@allow('read', auth().members?[m, m.organizationId == this.id])
+    @@allow('update', auth().members?[m, m.organizationId == this.id && (m.role == 'owner' || m.role == 'admin')])
+    @@allow('delete', auth().members?[m, m.organizationId == this.id && m.role == 'owner'])
+
+    @@map('organization')
+}
+
+// Dynamic access control — Better Auth stores role definitions here.
+// `permission` is a JSON STRING (Better Auth JSON.stringify/JSON.parse it
+// itself), NOT a Json column.
+model OrganizationRole {
+    id             String       @id
+    organizationId String
+    organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+    role           String
+    permission     String
+    createdAt      DateTime     @default(now())
+    updatedAt      DateTime?    @updatedAt
+
+    @@allow('read', auth().members?[m, m.organizationId == this.organizationId])
+    @@allow('create,update', auth().members?[m, m.organizationId == this.organizationId && (m.role == 'owner' || m.role == 'admin')])
+    @@allow('delete', auth().members?[m, m.organizationId == this.organizationId && m.role == 'owner'])
+
+    @@map('organizationRole')
+}
+
+model Member {
+    id             String       @id
+    organizationId String
+    organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+    userId         String
+    user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+    role           String       @default('member')
+    createdAt      DateTime
+
+    @@allow('create', auth().members?[m, m.organizationId == this.organizationId && (m.role == 'owner' || m.role == 'admin')])
+    @@allow('read', auth().members?[m, m.organizationId == this.organizationId])
+    @@allow('update', auth().members?[m, m.organizationId == this.organizationId && m.role == 'owner'])
+    @@allow('delete', auth().members?[m, m.organizationId == this.organizationId && m.role == 'owner'])
+
+    @@map('member')
+}
+
+model Invitation {
+    id             String       @id
+    organizationId String
+    organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+    email          String
+    role           String?
+    status         String       @default('pending')
+    expiresAt      DateTime
+    createdAt      DateTime     @default(now())
+    inviterId      String
+    user           User         @relation(fields: [inviterId], references: [id], onDelete: Cascade)
+
+    @@allow('create', auth().members?[m, m.organizationId == this.organizationId && (m.role == 'owner' || m.role == 'admin')])
+    @@allow('read', auth().members?[m, m.organizationId == this.organizationId && (m.role == 'owner' || m.role == 'admin')])
+    @@allow('update', auth().members?[m, m.organizationId == this.organizationId && (m.role == 'owner' || m.role == 'admin')])
+    @@allow('delete', auth().members?[m, m.organizationId == this.organizationId && (m.role == 'owner' || m.role == 'admin')])
+
+    @@map('invitation')
+}
+
+model TwoFactor {
+    id                      String    @id
+    secret                  String
+    backupCodes             String
+    userId                  String
+    user                    User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+    verified                Boolean?  @default(true)
+    failedVerificationCount Int?      @default(0)
+    lockedUntil             DateTime?
+
+    @@map('twoFactor')
+}
+
+// -------------------------------------------------------------------------------------------
+// Domain enums
+// -------------------------------------------------------------------------------------------
+
+enum Gender {
+    MALE
+    FEMALE
+}
+
+enum ParentRelationship {
+    FATHER
+    MOTHER
+    GUARDIAN
+}
+
+enum StudentStatus {
+    ACTIVE
+    TRANSFERRED
+    DROPPED
+    GRADUATED
+}
+
+enum StudentGroupStatus {
+    ACTIVE
+    ENDED
+}
+
+enum CourseEnrollmentStatus {
+    ACTIVE
+    COMPLETED
+    DROPPED
+}
+
+// -------------------------------------------------------------------------------------------
+// Mixins
+// -------------------------------------------------------------------------------------------
+
+// Shared field group: org scope + lifecycle timestamps. Inlined into every domain model.
+type OrgBase {
+    id             String   @id @default(ulid())
+    organizationId String
+    createdAt      DateTime @default(now())
+    updatedAt      DateTime @updatedAt
+}
+
+// -------------------------------------------------------------------------------------------
+// Identity
+// -------------------------------------------------------------------------------------------
+
+// Master identity layer — may exist without an auth account (deceased parents, no-email
+// guardians). `userId` is a plain scalar; the relation is optional and adds no column to
+// the auth `user` table (FK lives on person.userId).
+model Person with OrgBase {
+    userId      String?  @unique // null = no auth account
+    nik         String?  @unique // KTP — national identifier, not a login credential
+    nisn        String?          // National Student ID — permanent
+    name        String
+    gender      Gender?
+    birthDate   DateTime?   @db.Date
+    address     String?
+    phone       String?
+    isAlive     Boolean  @default(true)
+    preferences Json?           // notifications, theme, language
+    metadata    Json?           // dynamic: golongan darah, dll
+
+    user        User?          @relation('Profile', fields: [userId], references: [id])
+    students    Student[]      @relation('Profile')
+    employees   Employee[]     @relation('Profile')
+    childLinks  UserParent[]   @relation('Child')  // links where this profile is the child
+    parentLinks UserParent[]   @relation('Parent') // links where this profile is the parent
+
+    @@map('person')
+    @@allow('create,update', auth().members?[m, m.organizationId == this.organizationId && (m.role == 'owner' || m.role == 'admin')])
+    @@allow('read', auth().members?[m, m.organizationId == this.organizationId] || userId == auth().id)
+    @@allow('delete', auth().members?[m, m.organizationId == this.organizationId && m.role == 'owner'])
+}
+
+// Family structure: child ↔ parent, both sides are `Person`.
+model UserParent with OrgBase {
+    childProfileId String
+    childProfile   Person @relation('Child', fields: [childProfileId], references: [id], onDelete: Cascade)
+    parentId       String
+    parent         Person @relation('Parent', fields: [parentId], references: [id], onDelete: Cascade)
+    relationship   ParentRelationship
+    isPrimary      Boolean     @default(false)
+    isEmergency    Boolean     @default(false)
+
+    @@unique([childProfileId, parentId])
+    @@map('userParent')
+    @@allow('create,update', auth().members?[m, m.organizationId == this.organizationId && (m.role == 'owner' || m.role == 'admin')])
+    @@allow('read', auth().members?[m, m.organizationId == this.organizationId] || parent.userId == auth().id)
+    @@allow('delete', auth().members?[m, m.organizationId == this.organizationId && m.role == 'owner'])
+}
+
+// -------------------------------------------------------------------------------------------
+// Academic structure
+// -------------------------------------------------------------------------------------------
+
+model Year with OrgBase {
+    name            String          // e.g. "2025/2026"
+    startDate       DateTime        @db.Date
+    endDate         DateTime        @db.Date
+    isActive        Boolean         @default(false)
+    periods         Period[]
+    learningGroups  LearningGroup[]
+
+    @@map('year')
+    @@allow('create,update', auth().members?[m, m.organizationId == this.organizationId && (m.role == 'owner' || m.role == 'admin')])
+    @@allow('read', auth().members?[m, m.organizationId == this.organizationId])
+    @@allow('delete', auth().members?[m, m.organizationId == this.organizationId && m.role == 'owner'])
+}
+
+model Period with OrgBase {
+    yearId          String
+    year            Year                @relation(fields: [yearId], references: [id], onDelete: Cascade)
+    name            String              // "Ganjil", "Caturwulan 1", "Batch 1"
+    startDate       DateTime            @db.Date
+    endDate         DateTime            @db.Date
+    isActive        Boolean             @default(false)
+    learningGroups  LearningGroup[]
+    enrollments     CourseEnrollment[]
+
+    @@map('period')
+    @@allow('create,update', auth().members?[m, m.organizationId == this.organizationId && (m.role == 'owner' || m.role == 'admin')])
+    @@allow('read', auth().members?[m, m.organizationId == this.organizationId])
+    @@allow('delete', auth().members?[m, m.organizationId == this.organizationId && m.role == 'owner'])
+}
+
+// Generic subject: mapel / kitab / modul / program. Code is org-scoped.
+model LearningUnit with OrgBase {
+    name              String
+    code              String
+    level             Int?
+    enrollments       CourseEnrollment[]
+    employeeAssignments EmployeeLearningUnit[]
+
+    @@unique([organizationId, code])
+    @@map('learningUnit')
+    @@allow('create,update', auth().members?[m, m.organizationId == this.organizationId && (m.role == 'owner' || m.role == 'admin')])
+    @@allow('read', auth().members?[m, m.organizationId == this.organizationId])
+    @@allow('delete', auth().members?[m, m.organizationId == this.organizationId && m.role == 'owner'])
+}
+
+// Grouping: rombel / halaqah / batch. Tied to a Year, optionally a Period.
+model LearningGroup with OrgBase {
+    yearId            String
+    year              Year             @relation(fields: [yearId], references: [id], onDelete: Cascade)
+    periodId          String?
+    period            Period?          @relation(fields: [periodId], references: [id], onDelete: SetNull)
+    name              String
+    capacity          Int              @default(36)
+    homeroomTeacherId String?
+    homeroomTeacher   Employee?        @relation(fields: [homeroomTeacherId], references: [id], onDelete: SetNull)
+    memberships       StudentGroup[]
+
+    @@map('learningGroup')
+    @@allow('create,update', auth().members?[m, m.organizationId == this.organizationId && (m.role == 'owner' || m.role == 'admin')])
+    @@allow('read', auth().members?[m, m.organizationId == this.organizationId])
+    @@allow('delete', auth().members?[m, m.organizationId == this.organizationId && m.role == 'owner'])
+}
+
+// -------------------------------------------------------------------------------------------
+// Students
+// -------------------------------------------------------------------------------------------
+
+// Academic record: a person (Person) enrolled in a Year. Per-year per-org.
+model Student with OrgBase {
+    profileId   String
+    profile     Person     @relation('Profile', fields: [profileId], references: [id], onDelete: Cascade)
+    code        String
+    status      StudentStatus   @default(ACTIVE)
+    // Date-only: the calendar day of enrollment; the DB stores a DATE column.
+    // now() is invalid on @db.Date, so the default comes from the database itself.
+    enrollDate  DateTime        @default(dbgenerated("CURRENT_DATE")) @db.Date
+    graduatedAt DateTime?       @db.Date
+    archivedAt  DateTime?       // TRANSFERRED/DROPPED → hidden from active views
+    deletedAt   DateTime?       // soft-deleted → inaccessible
+    metadata    Json?
+    groupMemberships StudentGroup[]
+    enrollments      CourseEnrollment[]
+
+    @@map('student')
+    @@deny('read,update', deletedAt != null)
+    @@allow('create,update', auth().members?[m, m.organizationId == this.organizationId && (m.role == 'owner' || m.role == 'admin')])
+    @@allow('read', auth().members?[m, m.organizationId == this.organizationId] || profile.childLinks?[l, l.parent.userId == auth().id])
+    @@allow('delete', auth().members?[m, m.organizationId == this.organizationId && m.role == 'owner'])
+}
+
+// Membership with history: transfers and re-enrollments are auditable.
+model StudentGroup with OrgBase {
+    studentId       String
+    student         Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+    learningGroupId String
+    learningGroup   LearningGroup    @relation(fields: [learningGroupId], references: [id], onDelete: Cascade)
+    joinedDate      DateTime         @default(dbgenerated("CURRENT_DATE")) @db.Date
+    endDate         DateTime?        @db.Date // null = still active
+    status          StudentGroupStatus @default(ACTIVE)
+    enrollments     CourseEnrollment[]
+
+    @@unique([studentId, learningGroupId, joinedDate])
+    @@map('studentGroup')
+    @@allow('create,update', auth().members?[m, m.organizationId == this.organizationId && (m.role == 'owner' || m.role == 'admin')])
+    @@allow('read', auth().members?[m, m.organizationId == this.organizationId] || student.profile.childLinks?[l, l.parent.userId == auth().id])
+    @@allow('delete', auth().members?[m, m.organizationId == this.organizationId && m.role == 'owner'])
+}
+
+// THE HEART: student + unit + period. Grades live directly on the enrollment.
+model CourseEnrollment with OrgBase {
+    studentId       String
+    student         Student               @relation(fields: [studentId], references: [id], onDelete: Cascade)
+    learningUnitId  String
+    learningUnit    LearningUnit          @relation(fields: [learningUnitId], references: [id], onDelete: Cascade)
+    periodId        String
+    period          Period                @relation(fields: [periodId], references: [id], onDelete: Cascade)
+    studentGroupId  String?               // which learning-group the student was in at enrollment time
+    studentGroup    StudentGroup?         @relation(fields: [studentGroupId], references: [id], onDelete: SetNull)
+    status          CourseEnrollmentStatus @default(ACTIVE)
+    score           Float?
+    maxScore        Float                 @default(100)
+    gradeDate       DateTime?             @db.Date
+    gradeRecordedBy String?               // userId
+
+    @@unique([studentId, learningUnitId, periodId])
+    @@map('courseEnrollment')
+    @@allow('create,update', auth().members?[m, m.organizationId == this.organizationId])
+    @@allow('read', auth().members?[m, m.organizationId == this.organizationId] || student.profile.childLinks?[l, l.parent.userId == auth().id])
+    @@allow('delete', auth().members?[m, m.organizationId == this.organizationId && m.role == 'owner'])
+}
+
+// -------------------------------------------------------------------------------------------
+// Staff
+// -------------------------------------------------------------------------------------------
+
+model Employee with OrgBase {
+    profileId       String
+    profile         Person      @relation('Profile', fields: [profileId], references: [id], onDelete: Cascade)
+    nip             String?          @unique // Nomor Induk Pegawai — tied to appointment
+    joinDate        DateTime         @db.Date
+    endDate         DateTime?        @db.Date // set when leaving
+    archivedAt      DateTime?
+    deletedAt       DateTime?
+    phone           String?
+    homeroomGroups  LearningGroup[]
+    unitAssignments EmployeeLearningUnit[]
+
+    @@map('employee')
+    @@deny('read,update', deletedAt != null)
+    @@allow('create,update', auth().members?[m, m.organizationId == this.organizationId && (m.role == 'owner' || m.role == 'admin')])
+    @@allow('read', auth().members?[m, m.organizationId == this.organizationId])
+    @@allow('delete', auth().members?[m, m.organizationId == this.organizationId && m.role == 'owner'])
+}
+
+// Teacher ↔ subject assignment.
+model EmployeeLearningUnit with OrgBase {
+    employeeId     String
+    employee       Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+    learningUnitId String
+    learningUnit   LearningUnit @relation(fields: [learningUnitId], references: [id], onDelete: Cascade)
+
+    @@unique([employeeId, learningUnitId])
+    @@map('employeeLearningUnit')
+    @@allow('create,update', auth().members?[m, m.organizationId == this.organizationId && (m.role == 'owner' || m.role == 'admin')])
+    @@allow('read', auth().members?[m, m.organizationId == this.organizationId])
+    @@allow('delete', auth().members?[m, m.organizationId == this.organizationId && m.role == 'owner'])
+}
+
+// -------------------------------------------------------------------------------------------
+// Audit
+// -------------------------------------------------------------------------------------------
+
+// Generic change tracking — append-only. `userId` = actor (plain scalar).
+model AuditLog with OrgBase {
+    entityType String   // 'courseEnrollment', 'student', ...
+    entityId   String
+    action     String   // 'create' | 'update' | 'delete' | 'hard_delete'
+    userId     String   // actor
+    changes    Json?    // { field: { old, new } }
+
+    @@map('auditLog')
+    @@allow('create', auth().members?[m, m.organizationId == this.organizationId])
+    @@allow('read', auth().members?[m, m.organizationId == this.organizationId && (m.role == 'owner' || m.role == 'admin')])
+    @@deny('update,delete', true)
+}
+
+// -------------------------------------------------------------------------------------------
+// Notifications & devices
+// -------------------------------------------------------------------------------------------
+
+// Push device registration — 1 device per user per platform.
+model UserDevice with OrgBase {
+    userId     String   // plain scalar (no relation to generated User)
+    platform   String   // 'ios' | 'android' | 'web'
+    token      String   // push token
+    isActive   Boolean  @default(true)
+    lastSeenAt DateTime?
+
+    @@unique([userId, platform])
+    @@map('userDevice')
+    @@allow('create', auth().members?[m, m.organizationId == this.organizationId] || userId == auth().id)
+    @@allow('read,update,delete', auth().members?[m, m.organizationId == this.organizationId] || userId == auth().id)
+}
+
+// -------------------------------------------------------------------------------------------
+// Content
+// -------------------------------------------------------------------------------------------
+
+enum PostStatus {
+    DRAFT
+    PUBLISHED
+    ARCHIVED
+}
+
+enum NotificationChannel {
+    WEB
+    EMAIL
+    WHATSAPP
+}
+
+model Post {
+    id             String        @id @default(ulid())
+    title          String
+    content        String
+    excerpt        String?
+    status         PostStatus    @default(DRAFT)
+    publishedAt    DateTime?
+    author         User?         @relation(fields: [authorId], references: [id], onDelete: Cascade)
+    authorId       String?
+    organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+    organizationId String?
+    createdAt      DateTime      @default(now())
+    updatedAt      DateTime      @updatedAt
+
+    @@allow('all', true)
+
+    @@index([organizationId, status])
+    @@index([authorId])
+    @@index([publishedAt])
+    @@map('post')
+}
+
+model Notification {
+    id        String                @id @default(ulid())
+    user      User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+    userId    String
+    title     String?
+    body      String
+    channels  NotificationChannel[]
+    readAt    DateTime?
+    sentAt    DateTime?             @default(now())
+    url       String?
+    color     String?
+    icon      String?
+    createdAt DateTime              @default(now())
+
+    @@allow('read', auth() != null && auth().id == userId)
+    @@allow('update', auth() != null && auth().id == userId)
+
+    @@index([userId, createdAt])
+    @@map('notifications')
+}

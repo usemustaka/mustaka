@@ -1,0 +1,28 @@
+{
+  "name": "mustaka",
+  "type": "module",
+  "private": true,
+  "workspaces": [
+    "apps/**",
+    "packages/**"
+  ],
+  "scripts": {
+    "dev": "bun run --filter @mustaka/api --filter @mustaka/web dev",
+    "dev:web": "bun run --filter @mustaka/web dev",
+    "dev:api": "bun run --filter @mustaka/api dev",
+    "dev:tasks": "bun run --filter @mustaka/tasks dev",
+    "db:push": "bun run --filter @mustaka/db db:push",
+    "db:generate": "bun run --filter @mustaka/db db:generate",
+    "auth:generate": "bun run --filter @mustaka/auth auth:generate"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.2"
+  },
+  "peerDependencies": {
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "ulid": "^3.0.2",
+    "zod": "^4.6.5"
+  }
+}
