@@ -35,7 +35,6 @@ const entries = computed(() => data.value ?? [])
 
 const visibility = useDocumentVisibility()
 const countdown = useCountdown(10, {
-  immediate: true,
   onComplete: () => {
     refresh()
     countdown.start()

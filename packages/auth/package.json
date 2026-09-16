@@ -4,7 +4,8 @@
 	"type": "module",
 	"private": true,
 	"scripts": {
-		"auth:generate": "bun --env-file=../../.env run -- bun x auth@latest generate --config ./index.ts --output ./../db/zenstack/auth.zmodel -y"
+		"auth:generate": "bun --env-file=../../.env run -- bun x auth@latest generate --config ./index.ts --output ./../db/zenstack/auth.zmodel -y",
+		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
 		"@mustaka/api": "workspace:*",

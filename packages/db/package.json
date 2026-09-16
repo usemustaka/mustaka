@@ -5,7 +5,8 @@
 	"private": true,
 	"scripts": {
 		"db:push": "bun --env-file=../../.env zen db push",
-		"db:generate": "bun --env-file=../../.env zen generate"
+		"db:generate": "bun --env-file=../../.env zen generate",
+		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
 		"@mustaka/auth": "workspace:*",

@@ -13,13 +13,17 @@
     "dev:tasks": "bun run --filter @mustaka/tasks dev",
     "db:push": "bun run --filter @mustaka/db db:push",
     "db:generate": "bun run --filter @mustaka/db db:generate",
-    "auth:generate": "bun run --filter @mustaka/auth auth:generate"
+    "auth:generate": "bun run --filter @mustaka/auth auth:generate",
+    "check": "bun run --filter '*' typecheck"
   },
   "devDependencies": {
     "@types/bun": "^1.4.2"
   },
   "peerDependencies": {
-    "typescript": "^7.0.2"
+    "typescript": "^6.0.3"
+  },
+  "overrides": {
+    "typescript": "^6.0.3"
   },
   "dependencies": {
     "ulid": "^3.0.2",

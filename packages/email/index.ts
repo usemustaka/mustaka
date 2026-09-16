@@ -1,4 +1,5 @@
-import nodemailer from "nodemailer";
+import { createTransport } from "nodemailer";
+import type { SendMailOptions, Transporter } from "nodemailer";
 import { logger } from '@mustaka/logger';
 
 interface SendEmailOptions {
@@ -8,9 +9,9 @@ interface SendEmailOptions {
   html?: string;
 }
 
-let transporter: nodemailer.Transporter | null = null;
+let transporter: Transporter | null = null;
 
-function getTransporter(): nodemailer.Transporter {
+function getTransporter(): Transporter {
   if (transporter) return transporter;
 
   const host = process.env.SMTP_HOST;
@@ -23,15 +24,15 @@ function getTransporter(): nodemailer.Transporter {
       "⚠️  SMTP not configured (SMTP_HOST, SMTP_USER, SMTP_PASS). Email will be logged only."
     );
     transporter = {
-      sendMail: async (mailOptions: nodemailer.SendMailOptions) => {
+      sendMail: async (mailOptions: SendMailOptions) => {
         logger.email.debug(`to: ${mailOptions.to}, subject: ${mailOptions.subject}`);
         return { messageId: "logged-only" };
       },
-    } as unknown as nodemailer.Transporter;
+    } as unknown as Transporter;
     return transporter;
   }
 
-  transporter = nodemailer.createTransport({
+  transporter = createTransport({
     host,
     port,
     secure: port === 465,
@@ -54,7 +55,7 @@ export async function sendEmail(options: SendEmailOptions): Promise<void> {
     from = `"Monorepo" <${from}>`;
   }
 
-  const mailOptions: nodemailer.SendMailOptions = {
+  const mailOptions: SendMailOptions = {
     from,
     to: options.to,
     subject: options.subject,
