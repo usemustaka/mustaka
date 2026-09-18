@@ -26,7 +26,7 @@ services:
       - "8080:8080"
 
   minio:
-    image: minio/minio:latest
+    image: quay.io/minio/minio:latest
     container_name: repo-minio
     restart: always
     command: server /data --console-address ":9001"
